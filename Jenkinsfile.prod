@@ -1,0 +1,89 @@
+pipeline {
+    agent any
+
+    options {
+        ansiColor('xterm')
+    }
+
+    environment {
+        BRANCH = 'master'
+        REPO_GIT = 'bitbucket.org/erafone/cms-content-generator-deployment.git'
+        PROJECT_NAME = 'cms-content-generator'
+    }
+
+    stages {
+	    stage('Scm Checkout') {
+		    steps {
+                script {
+                    withCredentials([string(credentialsId: 'telegramToken', variable: 'TOKEN'), string(credentialsId: 'telegramChatId', variable: 'CHAT_ID'), string(credentialsId: 'telegramThread', variable: 'THREAD_ID')]) {
+                        sh('curl -s -X POST https://api.telegram.org/bot${TOKEN}/sendMessage -d "chat_id=${CHAT_ID}" -d message_thread_id=${THREAD_ID} -d text="🔥 Jenkins start deploy \n Repo : ${PROJECT_NAME} \n Branch : ${BRANCH} \n [View build logs] (${BUILD_URL}console)"' )
+					}
+				}
+			    checkout scm
+		    }
+	    }
+
+
+	    stage('Build Docker Image') {
+		    steps {
+			    script {
+				    image = docker.build("gcr.io/eraspace-252803/$PROJECT_NAME:build-$BUILD_NUMBER" , "-f Dockerfile.prod .")
+			    }
+		    }
+	    }
+	    
+	    stage("Push Docker Image") {
+		    steps {
+			    script {
+				    echo "Push Docker Image"
+				    docker.withRegistry('https://gcr.io', 'gcr:eraspace-252803') {
+            		    image.push("${env.BUILD_NUMBER}")
+					}
+			    }
+		    }
+	    }
+
+        stage('Update GIT Deployment') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'bitbucket', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME'), usernamePassword(credentialsId: 'argocd', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
+                        sh """
+                        git config user.email tri.faizal@erajaya.com
+                        git config user.name trifaizal
+
+                        rm -rf argocd
+                        git clone -b $BRANCH https://${GIT_USERNAME}:${GIT_PASSWORD}@$REPO_GIT argocd
+                        cat argocd/deployment/deployment.yaml | grep image:
+                        sed -i 's+gcr.io/eraspace-252803/$PROJECT_NAME.*+gcr.io/eraspace-252803/$PROJECT_NAME:$BUILD_NUMBER+g' argocd/deployment/deployment.yaml
+                        cat argocd/deployment/deployment.yaml | grep image:
+                        git -C ./argocd add .
+                        git -C ./argocd commit -m 'Done by Jenkins Job changemanifest: ${env.BUILD_NUMBER}'
+                        git -C ./argocd push -f https://${GIT_USERNAME}:${GIT_PASSWORD}@$REPO_GIT $BRANCH
+
+                        argocd login argocd.eratech.id --username ${USERNAME} --password ${PASSWORD} --grpc-web
+                        argocd app sync $PROJECT_NAME --async
+                        argocd app wait $PROJECT_NAME --timeout 600
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+	post {
+        failure {
+            script {
+             	withCredentials([string(credentialsId: 'telegramToken', variable: 'TOKEN'), string(credentialsId: 'telegramChatId', variable: 'CHAT_ID'), string(credentialsId: 'telegramThread', variable: 'THREAD_ID')]) {
+                    sh('curl -s -X POST https://api.telegram.org/bot${TOKEN}/sendMessage -d "chat_id=${CHAT_ID}" -d message_thread_id=${THREAD_ID} -d text="❌ Failed to build 😱 \n Repo : ${PROJECT_NAME} \n Branch : ${BRANCH} \n [View build logs] (${BUILD_URL}console)"')
+                    }
+                }
+        }
+        success {
+            script {
+             	withCredentials([string(credentialsId: 'telegramToken', variable: 'TOKEN'), string(credentialsId: 'telegramChatId', variable: 'CHAT_ID'), string(credentialsId: 'telegramThread', variable: 'THREAD_ID')]) {
+                    sh('curl -s -X POST https://api.telegram.org/bot${TOKEN}/sendMessage -d "chat_id=${CHAT_ID}" -d message_thread_id=${THREAD_ID} -d text="✅ Deployment success \n Repo : ${PROJECT_NAME} \n Branch : ${BRANCH} \n [View build logs] (${BUILD_URL}console)"')
+                    }
+        		}
+        }
+	}
+}
