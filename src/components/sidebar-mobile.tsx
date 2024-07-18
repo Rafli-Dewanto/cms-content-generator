@@ -67,7 +67,7 @@ const SidebarMobile = forwardRef<HTMLDivElement, Props>((props, ref) => {
                 </Link>
               </SideBarListItem>
               <button onClick={() => logout()}>
-                <SideBarListItem className="!mt-[34rem] cursor-pointer items-end rounded-md border border-gray-200 hover:bg-red-300 hover:text-red-900">
+                <SideBarListItem className="!mt-[12rem] cursor-pointer items-end rounded-md border border-gray-200 hover:bg-red-300 hover:text-red-900">
                   <LogOut width={20} height={20} />
                   <span className="w-full">Logout</span>
                 </SideBarListItem>
